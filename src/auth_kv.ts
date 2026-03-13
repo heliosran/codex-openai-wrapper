@@ -1,4 +1,5 @@
 import { AuthDotJson, TokenData, RefreshRequest, RefreshResponse, Env } from "./types";
+import { redactHeadersForLogging } from "./log_redaction";
 
 type JwtClaims = {
 	"https://api.openai.com/auth"?: {
@@ -7,9 +8,7 @@ type JwtClaims = {
 } & Record<string, unknown>;
 
 function urlBase64Decode(input: string): string {
-	// Replace non-url-safe chars with url-safe ones
 	input = input.replace(/-/g, "+").replace(/_/g, "/");
-	// Pad out with = for base64.decode to work
 	const pad = input.length % 4;
 	if (pad) {
 		input += new Array(5 - pad).join("=");
@@ -62,7 +61,6 @@ export async function getEffectiveChatgptAuth(
 	}
 }
 
-// Token refresh functionality
 export async function refreshAccessToken(env: Env): Promise<TokenData | null> {
 	if (!env.OPENAI_CODEX_AUTH) {
 		return null;
@@ -78,7 +76,7 @@ export async function refreshAccessToken(env: Env): Promise<TokenData | null> {
 		}
 
 		const clientId = env.CHATGPT_LOCAL_CLIENT_ID || "app_EMoamEEZ73f0CkXaXp7hrann";
-
+		const tokenEndpoint = "https://auth.openai.com/oauth/token";
 		const refreshRequest: RefreshRequest = {
 			client_id: clientId,
 			grant_type: "refresh_token",
@@ -86,7 +84,7 @@ export async function refreshAccessToken(env: Env): Promise<TokenData | null> {
 			scope: "openid profile email"
 		};
 
-		const response = await fetch("https://auth.openai.com/oauth/token", {
+		const response = await fetch(tokenEndpoint, {
 			method: "POST",
 			headers: {
 				"Content-Type": "application/json"
@@ -96,18 +94,23 @@ export async function refreshAccessToken(env: Env): Promise<TokenData | null> {
 
 		if (!response.ok) {
 			const errorText = await response.text().catch(() => "Unable to read error response");
+			const correlationId =
+				response.headers.get("x-request-id") || response.headers.get("cf-ray") || response.headers.get("traceparent");
 			console.error("=== TOKEN REFRESH FAILURE ===");
 			console.error("Status:", response.status, response.statusText);
-			console.error("Response Headers:", Object.fromEntries(response.headers.entries()));
-			console.error("Error Body:", errorText);
-			console.error("Request Body:", JSON.stringify(refreshRequest, null, 2));
+			console.error("Endpoint:", tokenEndpoint);
+			if (correlationId) {
+				console.error("Correlation ID:", correlationId);
+			}
+			if (env.VERBOSE === "true") {
+				console.error("Response Headers:", redactHeadersForLogging(response.headers));
+				console.error("Error Body:", errorText);
+			}
 			console.error("=============================");
 			return null;
 		}
 
 		const refreshResponse: RefreshResponse = await response.json();
-
-		// Update tokens
 		const updatedTokens: TokenData = {
 			id_token: refreshResponse.id_token,
 			access_token: refreshResponse.access_token || tokens.access_token,
@@ -115,15 +118,6 @@ export async function refreshAccessToken(env: Env): Promise<TokenData | null> {
 			account_id: tokens.account_id
 		};
 
-		// Update the auth in environment (this is a limitation - we can't modify env vars directly)
-		// In a real implementation, you'd want to update the stored auth.json
-		// const updatedAuth: AuthDotJson = {
-		// 	...auth,
-		// 	tokens: updatedTokens,
-		// 	last_refresh: new Date().toISOString()
-		// };
-
-		// Store in KV if available
 		if (env.KV) {
 			await env.KV.put("auth_tokens", JSON.stringify(updatedTokens));
 			await env.KV.put("auth_last_refresh", new Date().toISOString());
@@ -142,14 +136,12 @@ export async function refreshAccessToken(env: Env): Promise<TokenData | null> {
 }
 
 export async function getRefreshedAuth(env: Env): Promise<{ accessToken: string | null; accountId: string | null }> {
-	// First try to get current auth
 	const currentAuth = await getEffectiveChatgptAuth(env);
 
 	if (!currentAuth.accessToken) {
 		return currentAuth;
 	}
 
-	// Check if token needs refresh (older than 28 days or if we have KV storage with newer tokens)
 	let needsRefresh = false;
 
 	if (env.OPENAI_CODEX_AUTH) {
@@ -167,14 +159,12 @@ export async function getRefreshedAuth(env: Env): Promise<{ accessToken: string 
 		}
 	}
 
-	// Check KV for newer tokens
 	if (env.KV && !needsRefresh) {
 		try {
 			const kvLastRefresh = await env.KV.get("auth_last_refresh");
 			if (kvLastRefresh) {
 				const kvRefreshTime = new Date(kvLastRefresh);
 				if (kvRefreshTime.getTime() > Date.now() - 28 * 24 * 60 * 60 * 1000) {
-					// KV has newer tokens, use those
 					const kvTokens = await env.KV.get("auth_tokens", "json");
 					if (kvTokens) {
 						const tokens = kvTokens as TokenData;
@@ -190,7 +180,6 @@ export async function getRefreshedAuth(env: Env): Promise<{ accessToken: string 
 		}
 	}
 
-	// Refresh if needed
 	if (needsRefresh) {
 		const refreshedTokens = await refreshAccessToken(env);
 		if (refreshedTokens) {
