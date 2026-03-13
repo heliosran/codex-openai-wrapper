@@ -22,6 +22,7 @@ export interface Env {
 	REASONING_SUMMARY?: ReasoningSummary;
 	REASONING_COMPAT?: ReasoningCompat;
 	VERBOSE?: VerboseMode;
+	ALLOWED_ORIGINS?: string;
 }
 
 export type AuthTokens = {

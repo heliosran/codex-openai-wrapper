@@ -158,6 +158,9 @@ REASONING_COMPAT=think-tags
 # Optional: Debug settings
 VERBOSE=false
 DEBUG_MODEL=
+
+# Optional: CORS allowlist (comma-separated exact origins)
+ALLOWED_ORIGINS=https://app.example.com,https://admin.example.com
 ```
 
 For production, set the secrets:
@@ -243,6 +246,15 @@ The service will be available at `http://localhost:8787`
 | `OLLAMA_API_URL` | `http://localhost:11434` | Ollama instance URL for local model integration |
 | `DEBUG_MODEL` | - | Override model for debugging purposes |
 | `VERBOSE` | `false` | Enable detailed debug logging |
+| `ALLOWED_ORIGINS` | - | Comma-separated exact origins allowed for CORS (for example: `https://app.example.com,https://admin.example.com`) |
+
+
+#### CORS Configuration
+
+- CORS is deny-by-default unless an origin is listed in `ALLOWED_ORIGINS`.
+- `Access-Control-Allow-Credentials: true` is only returned for explicitly allowlisted origins.
+- Allowed methods are restricted to `POST`, `GET`, and `OPTIONS`.
+- Allowed request headers are restricted to `Content-Type` and `Authorization`.
 
 #### Authentication Security
 
