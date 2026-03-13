@@ -34,6 +34,8 @@ cp .dev.vars.example .dev.vars
 
 Edit [`.dev.vars`](./.dev.vars) with your configuration:
 
+> ⚠️ `start.sh` only auto-writes an allowlisted subset of variables into `.dev.vars` when the file does not already exist. Create `.dev.vars` manually when handling sensitive credentials or custom values; auto-generated files are convenience-only and should still be treated as secrets.
+
 ```bash
 # OpenAI API Configuration
 OPENAI_API_KEY=your_api_key_here
@@ -84,6 +86,8 @@ The service will be available at `http://localhost:8787`
 | `OPENAI_API_KEY` | Your OpenAI API key for authentication | ✅ | - |
 | `CHATGPT_RESPONSES_URL` | OpenAI API endpoint URL | ✅ | - |
 | `OPENAI_CODEX_AUTH` | JSON string with access tokens | ✅ | - |
+| `CHATGPT_LOCAL_CLIENT_ID` | Local ChatGPT client identifier | ❌ | - |
+| `OLLAMA_API_URL` | Ollama endpoint URL for local model routing | ❌ | - |
 | `REASONING_EFFORT` | AI reasoning depth: `minimal`, `low`, `medium`, `high` | ❌ | `minimal` |
 | `REASONING_SUMMARY` | Summary mode: `auto`, `on`, `off` | ❌ | `auto` |
 | `REASONING_COMPAT` | Compatibility mode: `think-tags`, `standard` | ❌ | `think-tags` |
