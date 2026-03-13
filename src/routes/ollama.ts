@@ -149,7 +149,7 @@ ollama.post("/show", openaiAuthMiddleware(), async (c) => {
 	});
 });
 
-ollama.get("/tags", async (c) => {
+ollama.get("/tags", openaiAuthMiddleware(), async (c) => {
 	// For /api/tags, we directly proxy the request to the upstream Ollama server
 	const { response: upstream, error: errorResp } = await startUpstreamRequest(
 		c.env,
