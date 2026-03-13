@@ -1,24 +1,85 @@
-import { env, createExecutionContext, waitOnExecutionContext, SELF } from 'cloudflare:test';
-import { describe, it, expect } from 'vitest';
-import worker from '../src/index';
+import { env, createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
+import { describe, it, expect } from "vitest";
+import worker from "../src/index";
 
-// For now, you'll need to do something like this to get a correctly-typed
-// `Request` to pass to `worker.fetch()`.
 const IncomingRequest = Request<unknown, IncomingRequestCfProperties>;
 
-describe('Hello World worker', () => {
-	it('responds with Hello World! (unit style)', async () => {
-		const request = new IncomingRequest('http://example.com');
-		// Create an empty context to pass to `worker.fetch()`.
+describe("CORS configuration", () => {
+	it("returns CORS headers and credentials for allowlisted origin preflight", async () => {
+		const request = new IncomingRequest("http://example.com/v1/chat/completions", {
+			method: "OPTIONS",
+			headers: {
+				Origin: "https://app.example.com",
+				"Access-Control-Request-Method": "POST"
+			}
+		});
 		const ctx = createExecutionContext();
-		const response = await worker.fetch(request, env, ctx);
-		// Wait for all `Promise`s passed to `ctx.waitUntil()` to settle before running test assertions
+		const response = await worker.fetch(
+			request,
+			{ ...env, ALLOWED_ORIGINS: "https://app.example.com,https://admin.example.com" },
+			ctx
+		);
 		await waitOnExecutionContext(ctx);
-		expect(await response.text()).toMatchInlineSnapshot(`"Hello World!"`);
+
+		expect(response.status).toBe(204);
+		expect(response.headers.get("Access-Control-Allow-Origin")).toBe("https://app.example.com");
+		expect(response.headers.get("Access-Control-Allow-Credentials")).toBe("true");
+		expect(response.headers.get("Access-Control-Allow-Methods")).toBe("POST,GET,OPTIONS");
+		expect(response.headers.get("Access-Control-Allow-Headers")).toBe("Content-Type,Authorization");
 	});
 
-	it('responds with Hello World! (integration style)', async () => {
-		const response = await SELF.fetch('https://example.com');
-		expect(await response.text()).toMatchInlineSnapshot(`"Hello World!"`);
+	it("does not return origin or credential headers for disallowed origin preflight", async () => {
+		const request = new IncomingRequest("http://example.com/v1/chat/completions", {
+			method: "OPTIONS",
+			headers: {
+				Origin: "https://evil.example.com",
+				"Access-Control-Request-Method": "POST"
+			}
+		});
+		const ctx = createExecutionContext();
+		const response = await worker.fetch(
+			request,
+			{ ...env, ALLOWED_ORIGINS: "https://app.example.com" },
+			ctx
+		);
+		await waitOnExecutionContext(ctx);
+
+		expect(response.status).toBe(204);
+		expect(response.headers.get("Access-Control-Allow-Origin")).toBeNull();
+		expect(response.headers.get("Access-Control-Allow-Credentials")).toBeNull();
+	});
+
+	it("returns origin and credentials for allowlisted origin on regular responses", async () => {
+		const request = new IncomingRequest("http://example.com/health", {
+			headers: {
+				Origin: "https://app.example.com"
+			}
+		});
+		const ctx = createExecutionContext();
+		const response = await worker.fetch(
+			request,
+			{ ...env, ALLOWED_ORIGINS: "https://app.example.com" },
+			ctx
+		);
+		await waitOnExecutionContext(ctx);
+
+		expect(response.status).toBe(200);
+		expect(response.headers.get("Access-Control-Allow-Origin")).toBe("https://app.example.com");
+		expect(response.headers.get("Access-Control-Allow-Credentials")).toBe("true");
+	});
+
+	it("omits credentials header when no origin is allowlisted", async () => {
+		const request = new IncomingRequest("http://example.com/health", {
+			headers: {
+				Origin: "https://app.example.com"
+			}
+		});
+		const ctx = createExecutionContext();
+		const response = await worker.fetch(request, { ...env, ALLOWED_ORIGINS: "" }, ctx);
+		await waitOnExecutionContext(ctx);
+
+		expect(response.status).toBe(200);
+		expect(response.headers.get("Access-Control-Allow-Origin")).toBeNull();
+		expect(response.headers.get("Access-Control-Allow-Credentials")).toBeNull();
 	});
 });
