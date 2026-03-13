@@ -21,7 +21,7 @@ export function openaiAuthMiddleware() {
 		const configuredKey = c.env.OPENAI_API_KEY;
 
 		if (!configuredKey) {
-			await next();
+			return c.json({ error: { message: "Server configuration error" } }, 500);
 		}
 
 		if (providedKey !== configuredKey) {
