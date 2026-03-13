@@ -2,6 +2,7 @@ import { normalizeModelName } from "./utils";
 import { getRefreshedAuth, refreshAccessToken } from "./auth_kv"; // Updated import
 import { getInstructionsForModel } from "./instructions";
 import { Env, InputItem, Tool } from "./types"; // Import types
+import { redactForLogging, redactHeadersForLogging } from "./log_redaction";
 
 type ReasoningParam = {
 	effort?: string;
@@ -19,6 +20,17 @@ type ErrorBody = {
 	raw?: string;
 	[key: string]: unknown;
 };
+
+function getSanitizedRequestBodyForLogging(requestBody: string | undefined): unknown {
+	if (!requestBody) {
+		return null;
+	}
+	try {
+		return redactForLogging(JSON.parse(requestBody));
+	} catch {
+		return "[UNPARSEABLE_REQUEST_BODY]";
+	}
+}
 
 async function generateSessionId(instructions: string | undefined, inputItems: InputItem[]): Promise<string> {
 	const content = `${instructions || ""}|${JSON.stringify(inputItems)}`;
@@ -42,10 +54,9 @@ export async function startUpstreamRequest(
 	}
 ): Promise<{ response: Response | null; error: Response | null }> {
 	const { instructions, tools, toolChoice, parallelToolCalls, reasoningParam } = options || {};
+	const verbose = env.VERBOSE === "true";
 
 	const { accessToken, accountId } = await getRefreshedAuth(env);
-
-	// KV token check (minimal logging)
 
 	if (!accessToken || !accountId) {
 		return {
@@ -79,7 +90,7 @@ export async function startUpstreamRequest(
 		? JSON.stringify(options?.ollamaPayload)
 		: JSON.stringify({
 				model: normalizeModelName(model, env.DEBUG_MODEL),
-				instructions: instructions || baseInstructions, // Use fetched instructions
+				instructions: instructions || baseInstructions,
 				input: inputItems,
 				tools: tools || [],
 				tool_choice:
@@ -93,7 +104,7 @@ export async function startUpstreamRequest(
 				include: include,
 				prompt_cache_key: sessionId,
 				...(reasoningParam && { reasoning: reasoningParam })
-			});
+		  });
 
 	const headers: HeadersInit = {
 		"Content-Type": "application/json"
@@ -114,48 +125,42 @@ export async function startUpstreamRequest(
 			method: "POST",
 			headers: headers,
 			body: requestBody
-			// Cloudflare Workers fetch does not have a 'timeout' option like requests.
-			// You might need to implement a custom timeout using AbortController if necessary.
 		});
 
-		// Response received
-
 		if (!upstreamResponse.ok) {
-			// Handle HTTP errors from upstream
-			const errorBody = (await upstreamResponse
-				.json()
-				.catch(() => ({ raw: upstreamResponse.statusText }))) as ErrorBody;
+			const errorBody = (await upstreamResponse.json().catch(() => ({ raw: upstreamResponse.statusText }))) as ErrorBody;
 
-			// Log complete error details for OpenAI failures
 			console.error("=== OPENAI API ERROR ===");
 			console.error("Status:", upstreamResponse.status, upstreamResponse.statusText);
 			console.error("URL:", requestUrl);
-			console.error("Headers:", Object.fromEntries(upstreamResponse.headers.entries()));
-			console.error("Error Body:", JSON.stringify(errorBody, null, 2));
-			console.error("Request Body:", requestBody);
+			console.error("Error Body:", JSON.stringify(redactForLogging(errorBody), null, 2));
+			if (verbose) {
+				console.error("Response Headers:", redactHeadersForLogging(upstreamResponse.headers));
+				console.error("Request Headers:", redactHeadersForLogging(headers));
+				console.error("Request Body:", getSanitizedRequestBodyForLogging(requestBody));
+			}
 			console.error("========================");
 
-			// Check if it's a 401 Unauthorized and we can refresh the token
 			if (upstreamResponse.status === 401 && env.OPENAI_CODEX_AUTH) {
 				const refreshedTokens = await refreshAccessToken(env);
 				if (refreshedTokens) {
-					const headers: HeadersInit = {
+					const retryHeaders: HeadersInit = {
 						"Content-Type": "application/json"
 					};
 
 					if (!isOllamaRequest) {
-						headers["Authorization"] = `Bearer ${refreshedTokens.access_token}`;
-						headers["Accept"] = "text/event-stream";
-						headers["chatgpt-account-id"] = refreshedTokens.account_id || accountId;
-						headers["OpenAI-Beta"] = "responses=experimental";
+						retryHeaders["Authorization"] = `Bearer ${refreshedTokens.access_token}`;
+						retryHeaders["Accept"] = "text/event-stream";
+						retryHeaders["chatgpt-account-id"] = refreshedTokens.account_id || accountId;
+						retryHeaders["OpenAI-Beta"] = "responses=experimental";
 						if (sessionId) {
-							headers["session_id"] = sessionId;
+							retryHeaders["session_id"] = sessionId;
 						}
 					}
 
 					const retryResponse = await fetch(requestUrl, {
 						method: "POST",
-						headers: headers,
+						headers: retryHeaders,
 						body: requestBody
 					});
 
@@ -180,11 +185,12 @@ export async function startUpstreamRequest(
 
 		return { response: upstreamResponse, error: null };
 	} catch (e: unknown) {
-		// Log complete error details for fetch failures
 		console.error("=== UPSTREAM REQUEST FAILURE ===");
 		console.error("URL:", requestUrl);
-		console.error("Request Body:", requestBody);
-		console.error("Headers:", headers);
+		if (verbose) {
+			console.error("Request Headers:", redactHeadersForLogging(headers));
+			console.error("Request Body:", getSanitizedRequestBodyForLogging(requestBody));
+		}
 		console.error("Error:", e);
 		if (e instanceof Error) {
 			console.error("Error Message:", e.message);
