@@ -593,6 +593,7 @@ The wrapper provides sophisticated reasoning capabilities with multiple configur
 
 #### Effort Levels
 - **`minimal`**: Basic reasoning with minimal token overhead
+- **`low`**: Lightweight reasoning with a little more depth
 - **`medium`**: Balanced reasoning for most use cases  
 - **`high`**: Deep reasoning for complex problems
 
@@ -680,6 +681,31 @@ curl -X POST https://your-worker.workers.dev/debug/auth \
 curl -X POST https://your-worker.workers.dev/debug/refresh \
   -H "Authorization: Bearer sk-your-api-key-here"
 ```
+
+### Quick Validation Checklist
+
+After deploying, you can validate the wrapper end-to-end in a few commands:
+
+```bash
+# 1) Health endpoint should return 200
+curl -i https://your-worker.workers.dev/health
+
+# 2) Models endpoint should return JSON model list
+curl -sS https://your-worker.workers.dev/v1/models \
+  -H "Authorization: Bearer sk-your-api-key-here"
+
+# 3) Non-streaming chat completion sanity check
+curl -sS https://your-worker.workers.dev/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk-your-api-key-here" \
+  -d '{
+    "model": "gpt-4",
+    "messages": [{"role": "user", "content": "Reply with: wrapper is working"}],
+    "stream": false
+  }'
+```
+
+If step 1 fails, deployment/networking is likely the issue. If step 2 or 3 fails with `401`, double-check your API key and request headers.
 
 ## 🏗️ How It Works
 
